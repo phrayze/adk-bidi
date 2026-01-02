@@ -12,9 +12,44 @@ const sessionId = "demo-session-" + Math.random().toString(36).substring(7);
 let websocket = null;
 let is_audio = false;
 
-// Build WebSocket URL (mode is determined server-side from model name)
+// Get checkbox elements for RunConfig options
+const enableProactivityCheckbox = document.getElementById("enableProactivity");
+const enableAffectiveDialogCheckbox = document.getElementById("enableAffectiveDialog");
+
+// Reconnect WebSocket when RunConfig options change
+function handleRunConfigChange() {
+  if (websocket && websocket.readyState === WebSocket.OPEN) {
+    addSystemMessage("Reconnecting with updated settings...");
+    addConsoleEntry('outgoing', 'Reconnecting due to settings change', {
+      proactivity: enableProactivityCheckbox.checked,
+      affective_dialog: enableAffectiveDialogCheckbox.checked
+    }, '🔄', 'system');
+    websocket.close();
+    // connectWebsocket() will be called by onclose handler after delay
+  }
+}
+
+// Add change listeners to RunConfig checkboxes
+enableProactivityCheckbox.addEventListener("change", handleRunConfigChange);
+enableAffectiveDialogCheckbox.addEventListener("change", handleRunConfigChange);
+
+// Build WebSocket URL with RunConfig options as query parameters
 function getWebSocketUrl() {
-  return "ws://" + window.location.host + "/ws/" + userId + "/" + sessionId;
+  const baseUrl = "ws://" + window.location.host + "/ws/" + userId + "/" + sessionId;
+  const params = new URLSearchParams();
+
+  // Add proactivity option if checked
+  if (enableProactivityCheckbox && enableProactivityCheckbox.checked) {
+    params.append("proactivity", "true");
+  }
+
+  // Add affective dialog option if checked
+  if (enableAffectiveDialogCheckbox && enableAffectiveDialogCheckbox.checked) {
+    params.append("affective_dialog", "true");
+  }
+
+  const queryString = params.toString();
+  return queryString ? baseUrl + "?" + queryString : baseUrl;
 }
 
 // Get DOM elements
@@ -32,6 +67,7 @@ let currentInputTranscriptionId = null;
 let currentInputTranscriptionElement = null;
 let currentOutputTranscriptionId = null;
 let currentOutputTranscriptionElement = null;
+let inputTranscriptionFinished = false; // Track if input transcription is complete for this turn
 
 // Helper function to clean spaces between CJK characters
 // Removes spaces between Japanese/Chinese/Korean characters while preserving spaces around Latin text
@@ -60,7 +96,12 @@ function formatTimestamp() {
   return now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
 }
 
-function addConsoleEntry(type, content, data = null, emoji = null, author = null) {
+function addConsoleEntry(type, content, data = null, emoji = null, author = null, isAudio = false) {
+  // Skip audio events if checkbox is unchecked
+  if (isAudio && !showAudioEventsCheckbox.checked) {
+    return;
+  }
+
   const entry = document.createElement("div");
   entry.className = `console-entry ${type}`;
 
@@ -328,9 +369,47 @@ function connectWebsocket() {
         : transcriptionText;
       eventSummary = `Output Transcription: "${truncated}"`;
       eventEmoji = '📝';
+    } else if (adkEvent.usageMetadata) {
+      // Show token usage information
+      const usage = adkEvent.usageMetadata;
+      const promptTokens = usage.promptTokenCount || 0;
+      const responseTokens = usage.candidatesTokenCount || 0;
+      const totalTokens = usage.totalTokenCount || 0;
+      eventSummary = `Token Usage: ${totalTokens.toLocaleString()} total (${promptTokens.toLocaleString()} prompt + ${responseTokens.toLocaleString()} response)`;
+      eventEmoji = '📊';
     } else if (adkEvent.content && adkEvent.content.parts) {
       const hasText = adkEvent.content.parts.some(p => p.text);
       const hasAudio = adkEvent.content.parts.some(p => p.inlineData);
+      const hasExecutableCode = adkEvent.content.parts.some(p => p.executableCode);
+      const hasCodeExecutionResult = adkEvent.content.parts.some(p => p.codeExecutionResult);
+
+      if (hasExecutableCode) {
+        // Show executable code
+        const codePart = adkEvent.content.parts.find(p => p.executableCode);
+        if (codePart && codePart.executableCode) {
+          const code = codePart.executableCode.code || '';
+          const language = codePart.executableCode.language || 'unknown';
+          const truncated = code.length > 60
+            ? code.substring(0, 60).replace(/\n/g, ' ') + '...'
+            : code.replace(/\n/g, ' ');
+          eventSummary = `Executable Code (${language}): ${truncated}`;
+          eventEmoji = '💻';
+        }
+      }
+
+      if (hasCodeExecutionResult) {
+        // Show code execution result
+        const resultPart = adkEvent.content.parts.find(p => p.codeExecutionResult);
+        if (resultPart && resultPart.codeExecutionResult) {
+          const outcome = resultPart.codeExecutionResult.outcome || 'UNKNOWN';
+          const output = resultPart.codeExecutionResult.output || '';
+          const truncatedOutput = output.length > 60
+            ? output.substring(0, 60).replace(/\n/g, ' ') + '...'
+            : output.replace(/\n/g, ' ');
+          eventSummary = `Code Execution Result (${outcome}): ${truncatedOutput}`;
+          eventEmoji = outcome === 'OUTCOME_OK' ? '✅' : '❌';
+        }
+      }
 
       if (hasText) {
         // Show text preview in summary
@@ -362,12 +441,22 @@ function connectWebsocket() {
           eventSummary = 'Audio Response';
           eventEmoji = '🔊';
         }
+
+        // Log audio event with isAudio flag (filtered by checkbox)
+        const sanitizedEvent = sanitizeEventForDisplay(adkEvent);
+        addConsoleEntry('incoming', eventSummary, sanitizedEvent, eventEmoji, author, true);
       }
     }
 
     // Create a sanitized version for console display (replace large audio data with summary)
-    const sanitizedEvent = sanitizeEventForDisplay(adkEvent);
-    addConsoleEntry('incoming', eventSummary, sanitizedEvent, eventEmoji, author);
+    // Skip if already logged as audio event above
+    const isAudioOnlyEvent = adkEvent.content && adkEvent.content.parts &&
+      adkEvent.content.parts.some(p => p.inlineData) &&
+      !adkEvent.content.parts.some(p => p.text);
+    if (!isAudioOnlyEvent) {
+      const sanitizedEvent = sanitizeEventForDisplay(adkEvent);
+      addConsoleEntry('incoming', eventSummary, sanitizedEvent, eventEmoji, author);
+    }
 
     // Handle turn complete event
     if (adkEvent.turnComplete === true) {
@@ -391,6 +480,7 @@ function connectWebsocket() {
       currentBubbleElement = null;
       currentOutputTranscriptionId = null;
       currentOutputTranscriptionElement = null;
+      inputTranscriptionFinished = false; // Reset for next turn
       return;
     }
 
@@ -434,6 +524,7 @@ function connectWebsocket() {
       currentBubbleElement = null;
       currentOutputTranscriptionId = null;
       currentOutputTranscriptionElement = null;
+      inputTranscriptionFinished = false; // Reset for next turn
       return;
     }
 
@@ -443,6 +534,11 @@ function connectWebsocket() {
       const isFinished = adkEvent.inputTranscription.finished;
 
       if (transcriptionText) {
+        // Ignore late-arriving transcriptions after we've finished for this turn
+        if (inputTranscriptionFinished) {
+          return;
+        }
+
         if (currentInputTranscriptionId == null) {
           // Create new transcription bubble
           currentInputTranscriptionId = Math.random().toString(36).substring(7);
@@ -491,6 +587,7 @@ function connectWebsocket() {
           // Reset input transcription state so next user input creates new balloon
           currentInputTranscriptionId = null;
           currentInputTranscriptionElement = null;
+          inputTranscriptionFinished = true; // Prevent duplicate bubbles from late events
         }
 
         if (currentOutputTranscriptionId == null) {
@@ -534,6 +631,7 @@ function connectWebsocket() {
         // Reset input transcription state so next user input creates new balloon
         currentInputTranscriptionId = null;
         currentInputTranscriptionElement = null;
+        inputTranscriptionFinished = true; // Prevent duplicate bubbles from late events
       }
 
       for (const part of parts) {
