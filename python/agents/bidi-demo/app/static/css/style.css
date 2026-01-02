@@ -74,9 +74,12 @@ h1 {
 }
 
 @keyframes pulse {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 1;
   }
+
   50% {
     opacity: 0.5;
   }
@@ -143,6 +146,7 @@ h1 {
     opacity: 0;
     transform: translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -224,13 +228,18 @@ h1 {
 }
 
 @keyframes ellipsis {
-  0%, 20% {
+
+  0%,
+  20% {
     content: '.';
   }
+
   40% {
     content: '..';
   }
-  60%, 100% {
+
+  60%,
+  100% {
     content: '...';
   }
 }
@@ -350,6 +359,24 @@ button {
 }
 
 #cameraButton:disabled {
+  background-color: #dadce0;
+  color: #80868b;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+#stopButton {
+  background-color: #ea4335;
+  color: white;
+}
+
+#stopButton:hover:not(:disabled) {
+  background-color: #d33426;
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
+}
+
+#stopButton:disabled {
   background-color: #dadce0;
   color: #80868b;
   cursor: not-allowed;
@@ -547,7 +574,8 @@ button {
   word-break: break-word;
   font-size: 0.7rem;
   line-height: 1.4;
-  padding-left: 2.5rem; /* Indent to align with header after emoji and icon */
+  padding-left: 2.5rem;
+  /* Indent to align with header after emoji and icon */
 }
 
 .console-entry-content:empty {
@@ -746,6 +774,7 @@ button {
     opacity: 0;
     transform: translateY(-20px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);

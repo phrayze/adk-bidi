@@ -25,6 +25,7 @@ const statusIndicator = document.getElementById("statusIndicator");
 const statusText = document.getElementById("statusText");
 const consoleContent = document.getElementById("consoleContent");
 const clearConsoleBtn = document.getElementById("clearConsole");
+const stopButton = document.getElementById("stopButton");
 let currentMessageId = null;
 let currentBubbleElement = null;
 let currentInputTranscriptionId = null;
@@ -288,8 +289,9 @@ function connectWebsocket() {
       url: ws_url
     }, '🔌', 'system');
 
-    // Enable the Send button
+    // Enable the Send button and Stop button
     document.getElementById("sendButton").disabled = false;
+    stopButton.disabled = false;
     addSubmitHandler();
   };
 
@@ -454,28 +456,23 @@ function connectWebsocket() {
 
           messagesDiv.appendChild(currentInputTranscriptionElement);
         } else {
-          // Update existing transcription bubble only if model hasn't started responding
-          // This prevents late partial transcriptions from overwriting complete ones
-          if (currentOutputTranscriptionId == null && currentMessageId == null) {
-            // Accumulate input transcription text (Live API sends incremental pieces)
-            const existingText = currentInputTranscriptionElement.querySelector(".bubble-text").textContent;
-            // Remove typing indicator if present
-            const cleanText = existingText.replace(/\.\.\.$/, '');
-            // Clean spaces between CJK characters before updating
-            const accumulatedText = cleanCJKSpaces(cleanText + transcriptionText);
-            updateMessageBubble(currentInputTranscriptionElement, accumulatedText, !isFinished);
-          }
+          // Update existing transcription bubble with new cumulative text
+          // Remove typing indicator if present (handled in updateMessageBubble)
+          // Clean spaces between CJK characters
+          const accumulatedText = cleanCJKSpaces(transcriptionText);
+          updateMessageBubble(currentInputTranscriptionElement, accumulatedText, !isFinished);
         }
-
-        // If transcription is finished, reset the state
-        if (isFinished) {
-          currentInputTranscriptionId = null;
-          currentInputTranscriptionElement = null;
-        }
-
-        scrollToBottom();
       }
+
+      // If transcription is finished, reset the state
+      if (isFinished) {
+        currentInputTranscriptionId = null;
+        currentInputTranscriptionElement = null;
+      }
+
+      scrollToBottom();
     }
+
 
     // Handle output transcription (model's spoken words)
     if (adkEvent.outputTranscription && adkEvent.outputTranscription.text) {
@@ -508,10 +505,8 @@ function connectWebsocket() {
           messagesDiv.appendChild(currentOutputTranscriptionElement);
         } else {
           // Update existing transcription bubble
-          const existingText = currentOutputTranscriptionElement.querySelector(".bubble-text").textContent;
-          // Remove typing indicator if present
-          const cleanText = existingText.replace(/\.\.\.$/, '');
-          updateMessageBubble(currentOutputTranscriptionElement, cleanText + transcriptionText, !isFinished);
+          // Use the raw transcription text as it is cumulative from the API
+          updateMessageBubble(currentOutputTranscriptionElement, transcriptionText, !isFinished);
         }
 
         // If transcription is finished, reset the state
@@ -580,6 +575,7 @@ function connectWebsocket() {
     console.log("WebSocket connection closed.");
     updateConnectionStatus(false);
     document.getElementById("sendButton").disabled = true;
+    stopButton.disabled = true;
     addSystemMessage("Connection closed. Reconnecting in 5 seconds...");
 
     // Log to console
@@ -614,6 +610,27 @@ function connectWebsocket() {
   };
 }
 connectWebsocket();
+
+// Stop button handler
+stopButton.addEventListener('click', () => {
+  if (websocket && websocket.readyState === WebSocket.OPEN) {
+    // 1. Send stop command to server
+    const jsonMessage = JSON.stringify({
+      type: "stop"
+    });
+    websocket.send(jsonMessage);
+    console.log("[CLIENT TO AGENT] Sent User Stop command");
+
+    // 2. Stop audio logic and reset UI state
+    stopAudio();
+
+    // 3. Log to console
+    addConsoleEntry('outgoing', 'Stop command sent', null, '🛑', 'user');
+
+    // 4. Show system message
+    addSystemMessage("Agent stopped by user.");
+  }
+});
 
 // Add submit handler to the form
 function addSubmitHandler() {
@@ -871,5 +888,47 @@ function audioRecorderHandler(pcmData) {
     // Log to console panel (optional, can be noisy with frequent audio chunks)
     // addConsoleEntry('outgoing', `Audio chunk: ${pcmData.byteLength} bytes`);
   }
+}
+
+// Stop audio processing
+function stopAudio() {
+  if (!is_audio) return;
+
+  is_audio = false;
+
+  // Signal end of audio to player processor to clear buffer
+  if (audioPlayerNode) {
+    audioPlayerNode.port.postMessage({ command: "endOfAudio" });
+  }
+
+  // Stop microphone stream
+  if (micStream) {
+    micStream.getTracks().forEach(track => track.stop());
+    micStream = null;
+  }
+
+  // Close audio contexts to release hardware
+  if (audioPlayerContext) {
+    audioPlayerContext.close();
+    audioPlayerContext = null;
+  }
+
+  if (audioRecorderContext) {
+    audioRecorderContext.close();
+    audioRecorderContext = null;
+  }
+
+  // Reset nodes
+  audioPlayerNode = null;
+  audioRecorderNode = null;
+
+  // Re-enable Start Audio button
+  startAudioButton.disabled = false;
+
+  // Log status
+  addConsoleEntry('system', 'Audio Mode Disabled', {
+    status: 'Audio worklets stopped',
+    message: 'Microphone and speakers released'
+  }, '🔇', 'system');
 }
 

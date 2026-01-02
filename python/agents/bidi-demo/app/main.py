@@ -1,6 +1,7 @@
 """FastAPI application demonstrating ADK Bidi-streaming with WebSocket."""
 
 import asyncio
+import httpx
 import json
 import logging
 import warnings
@@ -14,7 +15,7 @@ from google.adk.agents.live_request_queue import LiveRequestQueue
 from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
-from google.genai import types
+from google.genai import types, Client
 
 # Load environment variables from .env file BEFORE importing agent
 load_dotenv(Path(__file__).parent / ".env")
@@ -94,6 +95,7 @@ async def websocket_endpoint(
     if is_native_audio:
         # Native audio models require AUDIO response modality
         # with audio transcription
+        #response_modalities = ["AUDIO","TEXT"]
         response_modalities = ["AUDIO"]
         run_config = RunConfig(
             streaming_mode=StreamingMode.BIDI,
@@ -168,6 +170,13 @@ async def websocket_endpoint(
                     content = types.Content(
                         parts=[types.Part(text=json_message["text"])]
                     )
+                    live_request_queue.send_content(content)
+
+                # Handle stop command
+                elif json_message.get("type") == "stop":
+                    logger.debug("Received stop command")
+                    # Send a space to interrupt the model
+                    content = types.Content(parts=[types.Part(text=" ")])
                     live_request_queue.send_content(content)
 
                 # Handle image data

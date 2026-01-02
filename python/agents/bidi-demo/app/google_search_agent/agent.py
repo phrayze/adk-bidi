@@ -11,7 +11,7 @@ from google.adk.tools import google_search
 agent = Agent(
     name="google_search_agent",
     model=os.getenv(
-        "DEMO_AGENT_MODEL", "gemini-2.5-flash-native-audio-preview-09-2025"
+        "DEMO_AGENT_MODEL", "gemini-live-2.5-flash-native-audio"
     ),
     tools=[google_search],
     instruction="You are a helpful assistant that can search the web.",
